@@ -5,6 +5,8 @@ Aplicação FLASK para registro de presença em reuniões. Projeto Full-Stack pa
 Dúvidas entrar em contato com a José Otávio Junqueira.
 joseotaviojunqueira@usp.br
 
+<!--
 _/﹋\_
 (҂`_´) 
 <;︻╦╤─ ҉ – – – – – – – – – – – – –
+--!>
