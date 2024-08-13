@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.png') }}">
+    <link rel="stylesheet" href="../static/styledashboard.css">
+    <title>SAECOMP | Presença</title>
+</head>
+<body>
+    <div class="container">
+        <h1>Hello, Saecomper!</h1>
+        <h4>Leia o código de barras do seu cartão USP ou e-card para receber presença na reunião</h4>
+        <div id="message"></div>
+        <video id="camera" autoplay></video>
+    </div>
+
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script src="../static/script.js"></script>
+</body>
+</html>
