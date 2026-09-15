@@ -1,0 +1,10 @@
+client_secret.json
+token.json
+*.json
+!package.json
+.env
+venv/
+env/
+ENV/
+.venv/
+codes.txt

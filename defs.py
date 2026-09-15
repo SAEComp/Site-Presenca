@@ -90,6 +90,102 @@ def copiarlarguradecoluna(service, spreadsheet_id, source_sheet_id, target_sheet
         service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
         
         
+#função que atualiza a planilha do sheets. Executada todo dia meia noite somente se o arquivo 'codes.txt' não estiver vazio e limpa ele após executar
+
+def diariamente():
+    print("--- Iniciando Processo de Sincronização ---")
+    
+    if is_file_empty('codes.txt'):
+        print("Aviso: Arquivo 'codes.txt' está vazio. Encerrando.")
+        return
+
+    # 1. Autenticação (Mantém igual)
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+
+    service = build('sheets', 'v4', credentials=creds)
+    spreadsheet_id = '1aYOqH2rB6iRCJJBv4DRS6Ni0TBaYiHi7epVVOxieQgQ'
+    sheet = service.spreadsheets()
+
+    # 2. Identificar a aba de hoje
+    current_date = datetime.datetime.now().strftime("%d/%B/%Y")
+    target_sheet_title = f"Sheet_{current_date.replace('/', '_')}"
+    print(f"Data de hoje: {current_date} | Aba alvo: {target_sheet_title}")
+
+    # 3. Verificar se a aba de hoje já existe
+    metadata = sheet.get(spreadsheetId=spreadsheet_id).execute()
+    existing_sheets = [s['properties']['title'] for s in metadata.get('sheets', [])]
+    
+    if target_sheet_title not in existing_sheets:
+        print(f"Aba {target_sheet_title} não encontrada. Criando agora...")
+        
+        # Criar a nova aba
+        sheet.batchUpdate(spreadsheetId=spreadsheet_id, body={
+            'requests': [{'addSheet': {'properties': {'title': target_sheet_title}}}]
+        }).execute()
+
+        # Copiar dados da Sheet1 (Template) para a nova aba
+        # IMPORTANTE: Verifique se sua aba molde se chama 'Sheet1'
+        template_data = sheet.values().get(spreadsheetId=spreadsheet_id, range='Sheet1!A:B').execute().get('values', [])
+        
+        if template_data:
+            # 1. Cola Nomes e IDs
+            sheet.values().update(spreadsheetId=spreadsheet_id, range=f"{target_sheet_title}!A1",
+                                  valueInputOption="RAW", body={"values": template_data}).execute()
+            
+            # 2. Preenche "Ausente" na coluna C para todos
+            num_rows = len(template_data)
+            absence = [["Ausente"] for _ in range(1, num_rows)]
+            sheet.values().update(spreadsheetId=spreadsheet_id, range=f"{target_sheet_title}!C2:C{num_rows}",
+                                  valueInputOption="RAW", body={"values": absence}).execute()
+            
+            # 3. Coloca a data em E2
+            sheet.values().update(spreadsheetId=spreadsheet_id, range=f"{target_sheet_title}!E2",
+                                  valueInputOption="RAW", body={"values": [[current_date]]}).execute()
+        
+        print(f"Aba {target_sheet_title} criada com sucesso! Rode o script novamente para marcar as presenças.")
+        return # Encerra aqui para dar tempo do Google processar a nova aba
+
+    # 4. MARCAR PRESENÇA (Só roda se a aba já existir)
+    print(f"Aba {target_sheet_title} confirmada. Lendo dados...")
+    
+    with open('codes.txt', 'r') as file:
+        presentes_ids = [line.strip() for line in file if line.strip()]
+
+    # Pega os dados da aba de HOJE
+    result = sheet.values().get(spreadsheetId=spreadsheet_id, range=f"{target_sheet_title}!A:C").execute()
+    values = result.get('values', [])
+
+    encontrados = 0
+    for i, row in enumerate(values):
+        if len(row) < 2 or i == 0: continue
+        
+        id_planilha = str(row[1]).strip()
+        if id_planilha in presentes_ids:
+            print(f"-> Marcando Presente para: {id_planilha}")
+            sheet.values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f'{target_sheet_title}!C{i + 1}',
+                valueInputOption="RAW",
+                body={"values": [["Presente"]]}
+            ).execute()
+            encontrados += 1
+
+    if encontrados > 0:
+        clear_file('codes.txt')
+        print(f"Sincronização concluída! {encontrados} pessoas com presença.")
+    else:
+        print("Nenhum ID do arquivo codes.txt foi encontrado nesta planilha.")
+
 def is_file_empty(file_path):
     try:
         with open(file_path, 'r') as file:
@@ -105,116 +201,3 @@ def is_file_empty(file_path):
 def clear_file(file_path):
     with open(file_path, 'w') as file:
         pass
-
-#função que atualiza a planilha do sheets. Executada todo dia meia noite somente se o arquivo 'codes.txt' não estiver vazio e limpa ele após executar
-def diariamente():
-    if not is_file_empty('codes.txt'):
-        creds = None
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-                creds = flow.run_local_server(port=0)
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
-
-        service = build('sheets', 'v4', credentials=creds)
-        spreadsheet_id = '17HqMNAT7WVbt9FsrtNz-7SfFIejBsLL9yZq7ysHFUhQ'
-        range_name = 'Sheet1!E2'
-        sheet = service.spreadsheets()
-
-        # Verificar a data atual
-        result = sheet.values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
-        values = result.get('values', [])
-        current_date = datetime.datetime.now().strftime("%d/%B/%Y")
-
-        # Se a data da planilha for diferente da data atual, criar uma nova aba
-        if not values or values[0][0] != current_date:
-            new_sheet_title = f"Sheet_{current_date.replace('/', '_')}"
-            sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
-            sheets = sheet_metadata.get('sheets', '')
-
-            # Criar nova aba
-            new_sheet = {
-                'properties': {
-                    'title': new_sheet_title
-                }
-            }
-            response = service.spreadsheets().batchUpdate(
-                spreadsheetId=spreadsheet_id,
-                body={
-                    'requests': [
-                        {'addSheet': new_sheet}
-                    ]
-                }
-            ).execute()
-
-            new_sheet_id = response['replies'][0]['addSheet']['properties']['sheetId']
-            original_sheet_id = sheet_metadata['sheets'][0]['properties']['sheetId']
-
-            # Copiar dados da aba original para a nova aba
-            source_range = 'Sheet1!A:E'
-            source_values = sheet.values().get(spreadsheetId=spreadsheet_id, range=source_range).execute().get('values', [])
-
-            if source_values:
-                service.spreadsheets().values().update(
-                    spreadsheetId=spreadsheet_id,
-                    range=f"{new_sheet_title}!A1",
-                    valueInputOption="RAW",
-                    body={"values": source_values}
-                ).execute()
-
-            # Marcar todos como ausentes na nova aba
-            row_count = len(source_values)
-            absence_values = [["Ausente"] for _ in range(1, row_count)]
-            service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"{new_sheet_title}!C2:C{row_count}",
-                valueInputOption="RAW",
-                body={"values": absence_values}
-            ).execute()
-
-            # Atualizar a data na nova aba
-            service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"{new_sheet_title}!E2",
-                valueInputOption="RAW",
-                body={"values": [[current_date]]}
-            ).execute()
-
-            # Copiar formatação condicional
-            copiarformatacaodepresenca(service, spreadsheet_id, original_sheet_id, new_sheet_id)
-
-            # Copiar formatação de células
-            copiarformatacao(service, spreadsheet_id, original_sheet_id, new_sheet_id)
-
-            # Copiar tamanhos das colunas
-            copiarlarguradecoluna(service, spreadsheet_id, original_sheet_id, new_sheet_id)
-
-            range_name = f"{new_sheet_title}!B:B"
-        else:
-            range_name = 'Sheet1!B:B'
-
-        result = sheet.values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
-        values = result.get('values', [])
-        data = current_date
-        with open('codes.txt', 'r') as file:
-            for line in file:
-                code = int(line.strip())
-                for i, row in enumerate(values):
-                    if row and row[0] != 'NUsp' and int(row[0]) == code:
-                        cell_range = f'{new_sheet_title}!C{i + 1}'  
-                        receber = [["Presente"]]
-                        update_result = sheet.values().update(
-                            spreadsheetId=spreadsheet_id,
-                            range=cell_range,
-                            valueInputOption="RAW",
-                            body={"values": receber}).execute()
-                        nome_range = f'{new_sheet_title}!A{i + 1}'
-                        nome_result = sheet.values().get(spreadsheetId=spreadsheet_id, range=nome_range).execute()
-        clear_file('codes.txt')
-    else:
-        return
